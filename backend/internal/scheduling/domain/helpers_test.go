@@ -54,3 +54,58 @@ func newHeld(t *testing.T, now, start time.Time) *domain.Appointment {
 	a.PullEvents()
 	return a
 }
+
+// newConfirmed returns a confirmed appointment (held and confirmed at now),
+// starting at start, with its events already drained.
+func newConfirmed(t *testing.T, now, start time.Time) *domain.Appointment {
+	t.Helper()
+	a := newHeld(t, now, start)
+	if err := a.Confirm(now); err != nil {
+		t.Fatalf("setup: confirm: %v", err)
+	}
+	a.PullEvents()
+	return a
+}
+
+// withStatus rebuilds a copy of a in the given status, so tests can reach
+// any state without depending on other transitions being implemented.
+func withStatus(a *domain.Appointment, status domain.Status) *domain.Appointment {
+	s := a.Snapshot()
+	s.Status = status
+	if status != domain.StatusHeld {
+		s.HoldExpiresAt = time.Time{}
+	}
+	return domain.Reconstitute(s)
+}
+
+// allStatusesExcept lists every status but the given ones.
+func allStatusesExcept(except ...domain.Status) []domain.Status {
+	all := []domain.Status{
+		domain.StatusHeld, domain.StatusConfirmed, domain.StatusCancelled,
+		domain.StatusExpired, domain.StatusCompleted, domain.StatusNoShow,
+	}
+	var out []domain.Status
+	for _, s := range all {
+		skip := false
+		for _, e := range except {
+			if s == e {
+				skip = true
+			}
+		}
+		if !skip {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+// assertUnchanged fails if a failed transition changed state or recorded events.
+func assertUnchanged(t *testing.T, a *domain.Appointment, before domain.Snapshot) {
+	t.Helper()
+	if after := a.Snapshot(); after != before {
+		t.Errorf("state changed on failure:\nbefore %+v\nafter  %+v", before, after)
+	}
+	if n := len(a.PullEvents()); n != 0 {
+		t.Errorf("recorded %d events on failure, want 0", n)
+	}
+}
