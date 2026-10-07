@@ -9,5 +9,3 @@
 //   - adapters/connect/  RPC handlers
 //   - projectors/        read models built from events
 package scheduling
-
-// TODO(step-1): create domain/
