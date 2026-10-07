@@ -2,7 +2,10 @@
 // The domain never reads time itself: it receives `now` as a parameter.
 package clock
 
-import "time"
+import (
+	"sync"
+	"time"
+)
 
 type Clock interface {
 	Now() time.Time
@@ -12,27 +15,42 @@ type Clock interface {
 type System struct{}
 
 func (System) Now() time.Time {
-	// TODO(step-1): time.Now().UTC()
-	panic("not implemented")
+	return time.Now().UTC()
 }
 
 // Fixed is a controllable clock for tests. Safe for concurrent use
 // (step 2's concurrency test calls it from many goroutines).
 type Fixed struct {
-	// TODO(step-1): sync.Mutex + current time
+	mu  sync.Mutex
+	now time.Time
 }
 
 func NewFixed(t time.Time) *Fixed {
-	// TODO(step-1)
-	panic("not implemented")
+	return &Fixed{now: t.UTC()}
 }
 
 func (f *Fixed) Now() time.Time {
-	// TODO(step-1)
-	panic("not implemented")
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.now
 }
 
+// Advance moves the clock forward (or backward, with a negative d).
 func (f *Fixed) Advance(d time.Duration) {
-	// TODO(step-1)
-	panic("not implemented")
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.now = f.now.Add(d)
 }
+
+// Set jumps the clock to t.
+func (f *Fixed) Set(t time.Time) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.now = t.UTC()
+}
+
+// Compile-time checks that both types satisfy Clock.
+var (
+	_ Clock = System{}
+	_ Clock = (*Fixed)(nil)
+)
