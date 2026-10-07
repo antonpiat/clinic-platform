@@ -103,11 +103,25 @@ func normalize(t time.Time) time.Time {
 }
 
 // Confirm turns a hold into a confirmed appointment.
+// Confirming at exactly holdExpiresAt is still allowed.
 func (a *Appointment) Confirm(now time.Time) error {
-	// TODO(step-1): only from held, else ErrNotHeld
-	// TODO(step-1): now must not be after holdExpiresAt, else ErrHoldExpired
-	// TODO(step-1): status = confirmed, clear holdExpiresAt, record AppointmentConfirmed
-	panic("not implemented")
+	if a.status != StatusHeld {
+		return fmt.Errorf("%w: status is %s", ErrNotHeld, a.status)
+	}
+	now = normalize(now)
+	if now.After(a.holdExpiresAt) {
+		return fmt.Errorf("%w: expired at %s", ErrHoldExpired, a.holdExpiresAt.Format(time.RFC3339))
+	}
+
+	a.status = StatusConfirmed
+	a.holdExpiresAt = time.Time{}
+	a.record(AppointmentConfirmed{
+		meta:           meta{appointmentID: a.id, occurredAt: now},
+		PractitionerID: a.practitionerID,
+		PatientID:      a.patientID,
+		Slot:           a.slot,
+	})
+	return nil
 }
 
 // Cancel cancels a held or confirmed appointment. Patients cannot cancel a
@@ -122,11 +136,25 @@ func (a *Appointment) Cancel(now time.Time, by Actor, policy Policy) error {
 }
 
 // Expire releases a hold whose window has passed. Called by the worker job (step 7).
+// At exactly holdExpiresAt the hold is still valid (Confirm would succeed),
+// so it cannot expire yet.
 func (a *Appointment) Expire(now time.Time) error {
-	// TODO(step-1): only from held, else ErrNotHeld
-	// TODO(step-1): now must be after holdExpiresAt, else ErrHoldNotExpired
-	// TODO(step-1): status = expired, record AppointmentExpired
-	panic("not implemented")
+	if a.status != StatusHeld {
+		return fmt.Errorf("%w: status is %s", ErrNotHeld, a.status)
+	}
+	now = normalize(now)
+	if !now.After(a.holdExpiresAt) {
+		return fmt.Errorf("%w: expires at %s", ErrHoldNotExpired, a.holdExpiresAt.Format(time.RFC3339))
+	}
+
+	a.status = StatusExpired
+	a.holdExpiresAt = time.Time{}
+	a.record(AppointmentExpired{
+		meta:      meta{appointmentID: a.id, occurredAt: now},
+		PatientID: a.patientID,
+		Slot:      a.slot,
+	})
+	return nil
 }
 
 // Complete marks a confirmed appointment as attended.

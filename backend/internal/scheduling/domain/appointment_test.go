@@ -181,7 +181,79 @@ func TestNewHeldHelper(t *testing.T) {
 }
 
 func TestConfirm(t *testing.T) {
-	t.Skip("TODO(step-1): held -> confirmed; at exactly holdExpiresAt still ok; after expiry -> ErrHoldExpired; from every other status -> ErrNotHeld")
+	start := testNow.Add(24 * time.Hour)
+	expiresAt := testNow.Add(domain.DefaultPolicy().HoldDuration)
+
+	t.Run("held becomes confirmed", func(t *testing.T) {
+		a := newHeld(t, testNow, start)
+		confirmAt := testNow.Add(2 * time.Minute)
+
+		if err := a.Confirm(confirmAt); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if a.Status() != domain.StatusConfirmed {
+			t.Errorf("status = %q, want confirmed", a.Status())
+		}
+		if !a.HoldExpiresAt().IsZero() {
+			t.Errorf("holdExpiresAt = %s, want zero after confirm", a.HoldExpiresAt())
+		}
+
+		events := a.PullEvents()
+		if len(events) != 1 {
+			t.Fatalf("got %d events, want 1", len(events))
+		}
+		e, ok := events[0].(domain.AppointmentConfirmed)
+		if !ok {
+			t.Fatalf("event is %T, want AppointmentConfirmed", events[0])
+		}
+		if e.AppointmentID() != a.ID() || !e.OccurredAt().Equal(confirmAt) || e.Slot != a.Slot() {
+			t.Errorf("unexpected event: %+v", e)
+		}
+		if e.PatientID.String() != patientUUID || e.PractitionerID.String() != practitionerUUID {
+			t.Errorf("event ids: patient %s, practitioner %s", e.PatientID, e.PractitionerID)
+		}
+	})
+
+	t.Run("at exactly holdExpiresAt is still allowed", func(t *testing.T) {
+		a := newHeld(t, testNow, start)
+		if err := a.Confirm(expiresAt); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	t.Run("one microsecond after expiry fails", func(t *testing.T) {
+		a := newHeld(t, testNow, start)
+		before := a.Snapshot()
+
+		err := a.Confirm(expiresAt.Add(time.Microsecond))
+		if !errors.Is(err, domain.ErrHoldExpired) {
+			t.Fatalf("err = %v, want ErrHoldExpired", err)
+		}
+		assertUnchanged(t, a, before)
+	})
+
+	for _, status := range allStatusesExcept(domain.StatusHeld) {
+		t.Run("from "+string(status), func(t *testing.T) {
+			a := withStatus(newHeld(t, testNow, start), status)
+			before := a.Snapshot()
+
+			err := a.Confirm(testNow)
+			if !errors.Is(err, domain.ErrNotHeld) {
+				t.Fatalf("err = %v, want ErrNotHeld", err)
+			}
+			assertUnchanged(t, a, before)
+		})
+	}
+}
+
+func TestNewConfirmedHelper(t *testing.T) {
+	a := newConfirmed(t, testNow, testNow.Add(24*time.Hour))
+	if a.Status() != domain.StatusConfirmed {
+		t.Fatalf("status = %q", a.Status())
+	}
+	if n := len(a.PullEvents()); n != 0 {
+		t.Errorf("newConfirmed should drain events, got %d", n)
+	}
 }
 
 func TestCancel(t *testing.T) {
@@ -189,7 +261,81 @@ func TestCancel(t *testing.T) {
 }
 
 func TestExpire(t *testing.T) {
-	t.Skip("TODO(step-1): held past expiry -> expired; before expiry -> ErrHoldNotExpired; confirmed -> ErrNotHeld")
+	start := testNow.Add(24 * time.Hour)
+	expiresAt := testNow.Add(domain.DefaultPolicy().HoldDuration)
+
+	t.Run("held past expiry becomes expired", func(t *testing.T) {
+		a := newHeld(t, testNow, start)
+		expireAt := expiresAt.Add(time.Minute)
+
+		if err := a.Expire(expireAt); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if a.Status() != domain.StatusExpired {
+			t.Errorf("status = %q, want expired", a.Status())
+		}
+		if a.Status().BlocksSlot() {
+			t.Error("expired appointment must not block the slot")
+		}
+		if !a.HoldExpiresAt().IsZero() {
+			t.Errorf("holdExpiresAt = %s, want zero after expiry", a.HoldExpiresAt())
+		}
+
+		events := a.PullEvents()
+		if len(events) != 1 {
+			t.Fatalf("got %d events, want 1", len(events))
+		}
+		e, ok := events[0].(domain.AppointmentExpired)
+		if !ok {
+			t.Fatalf("event is %T, want AppointmentExpired", events[0])
+		}
+		if e.AppointmentID() != a.ID() || !e.OccurredAt().Equal(expireAt) || e.Slot != a.Slot() {
+			t.Errorf("unexpected event: %+v", e)
+		}
+	})
+
+	notYet := []struct {
+		name string
+		at   time.Time
+	}{
+		{"before expiry", expiresAt.Add(-time.Minute)},
+		{"at exactly holdExpiresAt", expiresAt},
+	}
+	for _, tt := range notYet {
+		t.Run(tt.name+" fails", func(t *testing.T) {
+			a := newHeld(t, testNow, start)
+			before := a.Snapshot()
+
+			err := a.Expire(tt.at)
+			if !errors.Is(err, domain.ErrHoldNotExpired) {
+				t.Fatalf("err = %v, want ErrHoldNotExpired", err)
+			}
+			assertUnchanged(t, a, before)
+		})
+	}
+
+	for _, status := range allStatusesExcept(domain.StatusHeld) {
+		t.Run("from "+string(status), func(t *testing.T) {
+			a := withStatus(newHeld(t, testNow, start), status)
+			before := a.Snapshot()
+
+			err := a.Expire(expiresAt.Add(time.Hour))
+			if !errors.Is(err, domain.ErrNotHeld) {
+				t.Fatalf("err = %v, want ErrNotHeld", err)
+			}
+			assertUnchanged(t, a, before)
+		})
+	}
+
+	t.Run("an expired hold can no longer be confirmed", func(t *testing.T) {
+		a := newHeld(t, testNow, start)
+		if err := a.Expire(expiresAt.Add(time.Minute)); err != nil {
+			t.Fatal(err)
+		}
+		if err := a.Confirm(expiresAt.Add(time.Minute)); !errors.Is(err, domain.ErrNotHeld) {
+			t.Fatalf("err = %v, want ErrNotHeld", err)
+		}
+	})
 }
 
 func TestComplete(t *testing.T) {
