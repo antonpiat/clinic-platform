@@ -1,6 +1,9 @@
 package domain
 
-import "time"
+import (
+	"fmt"
+	"time"
+)
 
 // Appointment is the aggregate root of the scheduling context.
 // It guards lifecycle rules. Overlap between appointments is NOT checked
@@ -32,11 +35,71 @@ type HoldParams struct {
 
 // Hold creates a temporary reservation that must be confirmed within policy.HoldDuration.
 func Hold(p HoldParams, now time.Time, policy Policy) (*Appointment, error) {
-	// TODO(step-1): slot must start after now, else ErrSlotInPast
-	// TODO(step-1): slot duration must equal p.ServiceDuration, else ErrDurationMismatch
-	// TODO(step-1): status = held, holdExpiresAt = now + policy.HoldDuration
-	// TODO(step-1): record AppointmentHeld
-	panic("not implemented")
+	if err := p.validate(); err != nil {
+		return nil, err
+	}
+	if policy.HoldDuration <= 0 {
+		return nil, fmt.Errorf("%w: hold duration must be positive", ErrInvalidPolicy)
+	}
+
+	now = normalize(now)
+	if !p.Slot.Start().After(now) {
+		return nil, fmt.Errorf("%w: slot starts at %s, now is %s",
+			ErrSlotInPast, p.Slot.Start().Format(time.RFC3339), now.Format(time.RFC3339))
+	}
+	if p.Slot.Duration() != p.ServiceDuration {
+		return nil, fmt.Errorf("%w: slot is %s, service is %s",
+			ErrDurationMismatch, p.Slot.Duration(), p.ServiceDuration)
+	}
+
+	a := &Appointment{
+		id:             p.ID,
+		practitionerID: p.PractitionerID,
+		patientID:      p.PatientID,
+		serviceID:      p.ServiceID,
+		slot:           p.Slot,
+		price:          p.Price,
+		status:         StatusHeld,
+		holdExpiresAt:  now.Add(policy.HoldDuration),
+	}
+	a.record(AppointmentHeld{
+		meta:           meta{appointmentID: a.id, occurredAt: now},
+		PractitionerID: a.practitionerID,
+		PatientID:      a.patientID,
+		ServiceID:      a.serviceID,
+		Slot:           a.slot,
+		Price:          a.price,
+		HoldExpiresAt:  a.holdExpiresAt,
+	})
+	return a, nil
+}
+
+// validate rejects zero values: every field must come from a constructor.
+func (p HoldParams) validate() error {
+	switch {
+	case p.ID.IsZero():
+		return fmt.Errorf("%w: appointment id is required", ErrInvalidID)
+	case p.PractitionerID.IsZero():
+		return fmt.Errorf("%w: practitioner id is required", ErrInvalidID)
+	case p.PatientID.IsZero():
+		return fmt.Errorf("%w: patient id is required", ErrInvalidID)
+	case p.ServiceID.IsZero():
+		return fmt.Errorf("%w: service id is required", ErrInvalidID)
+	case p.Slot == (TimeSlot{}):
+		return fmt.Errorf("%w: slot is required", ErrInvalidTimeSlot)
+	case p.Price == (Money{}):
+		return fmt.Errorf("%w: price is required", ErrInvalidMoney)
+	}
+	return nil
+}
+
+func (a *Appointment) record(e Event) {
+	a.events = append(a.events, e)
+}
+
+// normalize matches TimeSlot's precision so timestamps survive a DB round-trip.
+func normalize(t time.Time) time.Time {
+	return t.UTC().Truncate(time.Microsecond)
 }
 
 // Confirm turns a hold into a confirmed appointment.
