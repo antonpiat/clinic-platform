@@ -84,8 +84,9 @@ func (a *Appointment) MarkNoShow(now time.Time) error {
 
 // PullEvents returns recorded events and clears them.
 func (a *Appointment) PullEvents() []Event {
-	// TODO(step-1): return events, reset to empty slice
-	panic("not implemented")
+	events := a.events
+	a.events = nil
+	return events
 }
 
 // === Persistence support ===
@@ -104,14 +105,32 @@ type Snapshot struct {
 }
 
 func (a *Appointment) Snapshot() Snapshot {
-	// TODO(step-1): copy all fields
-	panic("not implemented")
+	return Snapshot{
+		ID:             a.id,
+		PractitionerID: a.practitionerID,
+		PatientID:      a.patientID,
+		ServiceID:      a.serviceID,
+		Slot:           a.slot,
+		Price:          a.price,
+		Status:         a.status,
+		HoldExpiresAt:  a.holdExpiresAt,
+		Version:        a.version,
+	}
 }
 
 // Reconstitute rebuilds an aggregate from storage. No rules, no events.
 func Reconstitute(s Snapshot) *Appointment {
-	// TODO(step-1): copy all fields, empty events
-	panic("not implemented")
+	return &Appointment{
+		id:             s.ID,
+		practitionerID: s.PractitionerID,
+		patientID:      s.PatientID,
+		serviceID:      s.ServiceID,
+		slot:           s.Slot,
+		price:          s.Price,
+		status:         s.Status,
+		holdExpiresAt:  s.HoldExpiresAt,
+		version:        s.Version,
+	}
 }
 
 // === Read accessors ===
