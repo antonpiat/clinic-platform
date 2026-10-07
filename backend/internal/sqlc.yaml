@@ -1,0 +1,12 @@
+# TODO(step-2): enable once db/migrations and db/queries contain files.
+# version: "2"
+# sql:
+#   - engine: postgresql
+#     schema: db/migrations
+#     queries: db/queries/scheduling
+#     gen:
+#       go:
+#         package: sqlcgen
+#         out: internal/scheduling/adapters/postgres/sqlcgen
+#         sql_package: pgx/v5
+#         emit_interface: true
