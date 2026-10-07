@@ -25,3 +25,7 @@ const (
 	ActorPatient Actor = "patient"
 	ActorClinic  Actor = "clinic"
 )
+
+func (a Actor) valid() bool {
+	return a == ActorPatient || a == ActorClinic
+}

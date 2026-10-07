@@ -126,13 +126,45 @@ func (a *Appointment) Confirm(now time.Time) error {
 
 // Cancel cancels a held or confirmed appointment. Patients cannot cancel a
 // confirmed appointment inside policy.PatientCancellationCutoff; the clinic can.
+// A hold whose window has already lapsed returns ErrHoldExpired: it is
+// Expire's job (worker, step 7) to close it, so history records what happened.
 func (a *Appointment) Cancel(now time.Time, by Actor, policy Policy) error {
-	// TODO(step-1): validate actor, else ErrInvalidActor
-	// TODO(step-1): cancelled -> ErrAlreadyCancelled; expired/completed/no_show -> ErrAlreadyFinished
-	// TODO(step-1): now >= slot start -> ErrAlreadyStarted
-	// TODO(step-1): patient + confirmed + (start - now) < cutoff -> ErrCancellationWindowClosed
-	// TODO(step-1): status = cancelled, clear holdExpiresAt, record AppointmentCancelled
-	panic("not implemented")
+	if !by.valid() {
+		return fmt.Errorf("%w: %q", ErrInvalidActor, by)
+	}
+	if policy.PatientCancellationCutoff < 0 {
+		return fmt.Errorf("%w: cancellation cutoff must not be negative", ErrInvalidPolicy)
+	}
+
+	switch a.status {
+	case StatusCancelled:
+		return ErrAlreadyCancelled
+	case StatusExpired, StatusCompleted, StatusNoShow:
+		return fmt.Errorf("%w: status is %s", ErrAlreadyFinished, a.status)
+	}
+
+	now = normalize(now)
+	if a.status == StatusHeld && now.After(a.holdExpiresAt) {
+		return fmt.Errorf("%w: expired at %s", ErrHoldExpired, a.holdExpiresAt.Format(time.RFC3339))
+	}
+	if !now.Before(a.slot.Start()) {
+		return fmt.Errorf("%w: started at %s", ErrAlreadyStarted, a.slot.Start().Format(time.RFC3339))
+	}
+	if by == ActorPatient && a.status == StatusConfirmed &&
+		a.slot.Start().Sub(now) < policy.PatientCancellationCutoff {
+		return fmt.Errorf("%w: cutoff is %s before start", ErrCancellationWindowClosed, policy.PatientCancellationCutoff)
+	}
+
+	a.status = StatusCancelled
+	a.holdExpiresAt = time.Time{}
+	a.record(AppointmentCancelled{
+		meta:           meta{appointmentID: a.id, occurredAt: now},
+		PractitionerID: a.practitionerID,
+		PatientID:      a.patientID,
+		Slot:           a.slot,
+		By:             by,
+	})
+	return nil
 }
 
 // Expire releases a hold whose window has passed. Called by the worker job (step 7).

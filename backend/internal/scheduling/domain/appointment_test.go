@@ -257,7 +257,218 @@ func TestNewConfirmedHelper(t *testing.T) {
 }
 
 func TestCancel(t *testing.T) {
-	t.Skip("TODO(step-1): patient cancels hold; patient outside cutoff; patient inside cutoff -> ErrCancellationWindowClosed; clinic inside cutoff ok; after start -> ErrAlreadyStarted; twice -> ErrAlreadyCancelled; final states -> ErrAlreadyFinished; invalid actor")
+	policy := domain.DefaultPolicy() // 24h patient cutoff
+	start := testNow.Add(72 * time.Hour)
+	cutoffAt := start.Add(-policy.PatientCancellationCutoff) // last moment a patient may cancel
+
+	success := []struct {
+		name  string
+		setup func(t *testing.T) *domain.Appointment
+		at    time.Time
+		by    domain.Actor
+	}{
+		{
+			name:  "patient cancels a hold",
+			setup: func(t *testing.T) *domain.Appointment { return newHeld(t, testNow, start) },
+			at:    testNow.Add(time.Minute),
+			by:    domain.ActorPatient,
+		},
+		{
+			name: "patient cancels a hold inside the cutoff (cutoff only applies to confirmed)",
+			setup: func(t *testing.T) *domain.Appointment {
+				return newHeld(t, testNow, testNow.Add(2*time.Hour))
+			},
+			at: testNow.Add(time.Minute),
+			by: domain.ActorPatient,
+		},
+		{
+			name:  "patient cancels confirmed outside the cutoff",
+			setup: func(t *testing.T) *domain.Appointment { return newConfirmed(t, testNow, start) },
+			at:    cutoffAt.Add(-time.Hour),
+			by:    domain.ActorPatient,
+		},
+		{
+			name:  "patient cancels confirmed at exactly the cutoff",
+			setup: func(t *testing.T) *domain.Appointment { return newConfirmed(t, testNow, start) },
+			at:    cutoffAt,
+			by:    domain.ActorPatient,
+		},
+		{
+			name:  "clinic cancels confirmed inside the cutoff",
+			setup: func(t *testing.T) *domain.Appointment { return newConfirmed(t, testNow, start) },
+			at:    start.Add(-time.Minute),
+			by:    domain.ActorClinic,
+		},
+		{
+			name:  "clinic cancels a hold",
+			setup: func(t *testing.T) *domain.Appointment { return newHeld(t, testNow, start) },
+			at:    testNow.Add(time.Minute),
+			by:    domain.ActorClinic,
+		},
+	}
+	for _, tt := range success {
+		t.Run(tt.name, func(t *testing.T) {
+			a := tt.setup(t)
+
+			if err := a.Cancel(tt.at, tt.by, policy); err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if a.Status() != domain.StatusCancelled {
+				t.Errorf("status = %q, want cancelled", a.Status())
+			}
+			if a.Status().BlocksSlot() {
+				t.Error("cancelled appointment must not block the slot")
+			}
+			if !a.HoldExpiresAt().IsZero() {
+				t.Errorf("holdExpiresAt = %s, want zero", a.HoldExpiresAt())
+			}
+
+			events := a.PullEvents()
+			if len(events) != 1 {
+				t.Fatalf("got %d events, want 1", len(events))
+			}
+			e, ok := events[0].(domain.AppointmentCancelled)
+			if !ok {
+				t.Fatalf("event is %T, want AppointmentCancelled", events[0])
+			}
+			if e.By != tt.by {
+				t.Errorf("By = %q, want %q", e.By, tt.by)
+			}
+			if e.AppointmentID() != a.ID() || !e.OccurredAt().Equal(tt.at) || e.Slot != a.Slot() {
+				t.Errorf("unexpected event: %+v", e)
+			}
+		})
+	}
+
+	failures := []struct {
+		name    string
+		setup   func(t *testing.T) *domain.Appointment
+		at      time.Time
+		by      domain.Actor
+		policy  domain.Policy
+		wantErr error
+	}{
+		{
+			name:    "patient inside the cutoff",
+			setup:   func(t *testing.T) *domain.Appointment { return newConfirmed(t, testNow, start) },
+			at:      cutoffAt.Add(time.Microsecond),
+			by:      domain.ActorPatient,
+			wantErr: domain.ErrCancellationWindowClosed,
+		},
+		{
+			name:    "patient after start",
+			setup:   func(t *testing.T) *domain.Appointment { return newConfirmed(t, testNow, start) },
+			at:      start.Add(time.Minute),
+			by:      domain.ActorPatient,
+			wantErr: domain.ErrAlreadyStarted,
+		},
+		{
+			name:    "clinic at exactly start",
+			setup:   func(t *testing.T) *domain.Appointment { return newConfirmed(t, testNow, start) },
+			at:      start,
+			by:      domain.ActorClinic,
+			wantErr: domain.ErrAlreadyStarted,
+		},
+		{
+			name:    "lapsed hold",
+			setup:   func(t *testing.T) *domain.Appointment { return newHeld(t, testNow, start) },
+			at:      testNow.Add(policy.HoldDuration + time.Second),
+			by:      domain.ActorPatient,
+			wantErr: domain.ErrHoldExpired,
+		},
+		{
+			name: "already cancelled",
+			setup: func(t *testing.T) *domain.Appointment {
+				return withStatus(newConfirmed(t, testNow, start), domain.StatusCancelled)
+			},
+			at:      testNow,
+			by:      domain.ActorClinic,
+			wantErr: domain.ErrAlreadyCancelled,
+		},
+		{
+			name: "expired",
+			setup: func(t *testing.T) *domain.Appointment {
+				return withStatus(newHeld(t, testNow, start), domain.StatusExpired)
+			},
+			at:      testNow,
+			by:      domain.ActorClinic,
+			wantErr: domain.ErrAlreadyFinished,
+		},
+		{
+			name: "completed",
+			setup: func(t *testing.T) *domain.Appointment {
+				return withStatus(newConfirmed(t, testNow, start), domain.StatusCompleted)
+			},
+			at:      testNow,
+			by:      domain.ActorClinic,
+			wantErr: domain.ErrAlreadyFinished,
+		},
+		{
+			name: "no show",
+			setup: func(t *testing.T) *domain.Appointment {
+				return withStatus(newConfirmed(t, testNow, start), domain.StatusNoShow)
+			},
+			at:      testNow,
+			by:      domain.ActorClinic,
+			wantErr: domain.ErrAlreadyFinished,
+		},
+		{
+			name:    "empty actor",
+			setup:   func(t *testing.T) *domain.Appointment { return newConfirmed(t, testNow, start) },
+			at:      testNow,
+			by:      "",
+			wantErr: domain.ErrInvalidActor,
+		},
+		{
+			name:    "unknown actor",
+			setup:   func(t *testing.T) *domain.Appointment { return newConfirmed(t, testNow, start) },
+			at:      testNow,
+			by:      "admin",
+			wantErr: domain.ErrInvalidActor,
+		},
+		{
+			name:    "negative cutoff",
+			setup:   func(t *testing.T) *domain.Appointment { return newConfirmed(t, testNow, start) },
+			at:      testNow,
+			by:      domain.ActorPatient,
+			policy:  domain.Policy{HoldDuration: time.Minute, PatientCancellationCutoff: -time.Hour},
+			wantErr: domain.ErrInvalidPolicy,
+		},
+	}
+	for _, tt := range failures {
+		t.Run(tt.name, func(t *testing.T) {
+			a := tt.setup(t)
+			before := a.Snapshot()
+			pol := policy
+			if tt.policy != (domain.Policy{}) {
+				pol = tt.policy
+			}
+
+			err := a.Cancel(tt.at, tt.by, pol)
+			if !errors.Is(err, tt.wantErr) {
+				t.Fatalf("err = %v, want %v", err, tt.wantErr)
+			}
+			assertUnchanged(t, a, before)
+		})
+	}
+
+	t.Run("zero cutoff lets patients cancel until start", func(t *testing.T) {
+		a := newConfirmed(t, testNow, start)
+		noCutoff := domain.Policy{HoldDuration: time.Minute}
+		if err := a.Cancel(start.Add(-time.Microsecond), domain.ActorPatient, noCutoff); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	t.Run("a cancelled appointment can no longer be confirmed", func(t *testing.T) {
+		a := newHeld(t, testNow, start)
+		if err := a.Cancel(testNow, domain.ActorPatient, policy); err != nil {
+			t.Fatal(err)
+		}
+		if err := a.Confirm(testNow); !errors.Is(err, domain.ErrNotHeld) {
+			t.Fatalf("err = %v, want ErrNotHeld", err)
+		}
+	})
 }
 
 func TestExpire(t *testing.T) {
