@@ -9,6 +9,7 @@ var (
 	ErrInvalidMoney    = errors.New("scheduling: invalid money")
 	ErrInvalidStatus   = errors.New("scheduling: invalid status")
 	ErrInvalidActor    = errors.New("scheduling: invalid actor")
+	ErrInvalidPolicy   = errors.New("scheduling: invalid policy")
 
 	// Hold
 	ErrSlotInPast       = errors.New("scheduling: slot starts in the past")
