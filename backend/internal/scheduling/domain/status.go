@@ -1,5 +1,7 @@
 package domain
 
+import "fmt"
+
 // Status values are stored as-is in the database (step 2).
 type Status string
 
@@ -14,19 +16,27 @@ const (
 
 // ParseStatus is used by the repository when loading from storage.
 func ParseStatus(value string) (Status, error) {
-	// TODO(step-1): accept only the constants above, else ErrInvalidStatus
-	panic("not implemented")
+	switch s := Status(value); s {
+	case StatusHeld, StatusConfirmed, StatusCancelled,
+		StatusExpired, StatusCompleted, StatusNoShow:
+		return s, nil
+	default:
+		return "", fmt.Errorf("%w: %q", ErrInvalidStatus, value)
+	}
 }
 
 // BlocksSlot reports whether this status occupies the time slot.
 // Must match the exclusion constraint's WHERE clause (ADR 0003).
 func (s Status) BlocksSlot() bool {
-	// TODO(step-1): true for held and confirmed
-	panic("not implemented")
+	return s == StatusHeld || s == StatusConfirmed
 }
 
 // IsFinal reports whether no further transition is possible.
 func (s Status) IsFinal() bool {
-	// TODO(step-1): true for cancelled, expired, completed, no_show
-	panic("not implemented")
+	switch s {
+	case StatusCancelled, StatusExpired, StatusCompleted, StatusNoShow:
+		return true
+	default:
+		return false
+	}
 }
