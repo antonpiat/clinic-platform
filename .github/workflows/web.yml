@@ -1,0 +1,23 @@
+name: web
+
+# TODO(step-6): replace with push/pull_request triggers on paths "apps/web/**".
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      # TODO(step-6): pnpm install --frozen-lockfile, typecheck, lint, build
+      - run: echo "web app not created yet"

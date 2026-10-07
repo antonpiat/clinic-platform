@@ -1,0 +1,58 @@
+name: backend
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "backend/**"
+      - ".github/workflows/backend.yml"
+  pull_request:
+    paths:
+      - "backend/**"
+      - ".github/workflows/backend.yml"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/go.mod
+          cache: false # TODO(step-2): enable cache once backend/go.sum exists
+      - uses: golangci/golangci-lint-action@v8
+        with:
+          version: latest
+          working-directory: backend
+          # If CI says golangci-lint was built with an older Go than 1.27,
+          # uncomment the next line (builds it with the job's Go version):
+          # install-mode: goinstall
+
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/go.mod
+          cache: false # TODO(step-2): enable cache once backend/go.sum exists
+      - name: Vet
+        run: go vet ./...
+      - name: Build
+        run: go build ./...
+      - name: Test
+        # Docker is preinstalled on ubuntu-latest, so testcontainers works here (step 2).
+        run: go test -race -count=1 ./...
+      # TODO(step-2): fail if generated sqlc code is out of date (sqlc diff)
