@@ -66,7 +66,17 @@ tasks:
     cmds:
       - go vet ./...
 
-  # TODO(step-0): lint and fmt tasks (added in 0.6 with golangci-lint)
+  lint:
+    desc: Run golangci-lint (includes depguard boundary rules)
+    dir: backend
+    cmds:
+      - golangci-lint run ./...
+
+  fmt:
+    desc: Format backend code (gofmt + goimports)
+    dir: backend
+    cmds:
+      - golangci-lint fmt ./...
 
   gen:
     desc: Generate code (sqlc, buf)
@@ -103,15 +113,3 @@ tasks:
       - task: vet
       - task: build
       - task: test
-  # ── Lint ───────────────────────────────────────────────
-  lint:
-    desc: Run golangci-lint (includes depguard boundary rules)
-    dir: backend
-    cmds:
-      - golangci-lint run ./...
-
-  fmt:
-    desc: Format backend code (gofmt + goimports)
-    dir: backend
-    cmds:
-      - golangci-lint fmt ./...

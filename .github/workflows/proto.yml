@@ -1,0 +1,23 @@
+name: proto
+
+# TODO(step-5): replace with push/pull_request triggers on paths "proto/**".
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  buf:
+    name: Buf
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: bufbuild/buf-action@v1
+        with:
+          input: proto
+          lint: true
+          format: true
+          breaking: ${{ github.event_name == 'pull_request' }}
+          breaking_against: "${{ github.event.repository.clone_url }}#branch=main,subdir=proto"
+      # TODO(step-5): run buf generate and fail if output differs (git diff --exit-code)
