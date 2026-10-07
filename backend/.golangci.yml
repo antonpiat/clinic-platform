@@ -1,0 +1,81 @@
+version: "2"
+
+linters:
+  default: standard
+  enable:
+    - depguard
+    - errorlint
+    - misspell
+    - bodyclose
+    - noctx
+  settings:
+    depguard:
+      rules:
+        # Domain packages depend on nothing but the stdlib and their own context.
+        domain-is-pure:
+          files:
+            - "**/internal/*/domain/**/*.go"
+          deny:
+            - pkg: "github.com/antonpiat/clinic-platform/backend/internal/platform"
+              desc: "domain must not depend on infrastructure"
+            - pkg: "github.com/jackc/pgx"
+              desc: "domain must not know about the database"
+            - pkg: "github.com/twmb/franz-go"
+              desc: "domain must not know about Kafka"
+            - pkg: "connectrpc.com"
+              desc: "domain must not know about transport"
+
+        # Bounded contexts talk through events, never through imports.
+        # TODO(step-3): allow scheduling -> catalog published contract package only.
+        scheduling-boundary:
+          files:
+            - "**/internal/scheduling/**/*.go"
+          deny:
+            - pkg: "github.com/antonpiat/clinic-platform/backend/internal/catalog"
+              desc: "use events or catalog's published contract"
+            - pkg: "github.com/antonpiat/clinic-platform/backend/internal/patients"
+              desc: "use events"
+            - pkg: "github.com/antonpiat/clinic-platform/backend/internal/notifications"
+              desc: "use events"
+
+        catalog-boundary:
+          files:
+            - "**/internal/catalog/**/*.go"
+          deny:
+            - pkg: "github.com/antonpiat/clinic-platform/backend/internal/scheduling"
+              desc: "use events"
+            - pkg: "github.com/antonpiat/clinic-platform/backend/internal/patients"
+              desc: "use events"
+            - pkg: "github.com/antonpiat/clinic-platform/backend/internal/notifications"
+              desc: "use events"
+
+        patients-boundary:
+          files:
+            - "**/internal/patients/**/*.go"
+          deny:
+            - pkg: "github.com/antonpiat/clinic-platform/backend/internal/scheduling"
+              desc: "use events"
+            - pkg: "github.com/antonpiat/clinic-platform/backend/internal/catalog"
+              desc: "use events"
+            - pkg: "github.com/antonpiat/clinic-platform/backend/internal/notifications"
+              desc: "use events"
+
+        notifications-boundary:
+          files:
+            - "**/internal/notifications/**/*.go"
+          deny:
+            - pkg: "github.com/antonpiat/clinic-platform/backend/internal/scheduling"
+              desc: "consume events, keep a local projection"
+            - pkg: "github.com/antonpiat/clinic-platform/backend/internal/catalog"
+              desc: "consume events, keep a local projection"
+            - pkg: "github.com/antonpiat/clinic-platform/backend/internal/patients"
+              desc: "consume events, keep a local projection"
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  settings:
+    goimports:
+      local-prefixes:
+        - github.com/antonpiat/clinic-platform

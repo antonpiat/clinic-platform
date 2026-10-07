@@ -99,7 +99,19 @@ tasks:
   ci:
     desc: Run what CI runs
     cmds:
+      - task: lint
       - task: vet
       - task: build
       - task: test
-      # TODO(step-0): add lint (0.6)
+  # ── Lint ───────────────────────────────────────────────
+  lint:
+    desc: Run golangci-lint (includes depguard boundary rules)
+    dir: backend
+    cmds:
+      - golangci-lint run ./...
+
+  fmt:
+    desc: Format backend code (gofmt + goimports)
+    dir: backend
+    cmds:
+      - golangci-lint fmt ./...
