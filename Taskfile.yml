@@ -1,0 +1,105 @@
+version: "3"
+
+# Loads DATABASE_URL etc. for tasks that need them (step 2 onwards).
+# Ignored if .env doesn't exist.
+dotenv: [".env"]
+
+vars:
+  COMPOSE: docker compose -f deploy/compose.yaml
+
+tasks:
+  default:
+    desc: List available tasks
+    cmds:
+      - task --list
+    silent: true
+
+  # ── Infrastructure ──────────────────────────────────────────
+  up:
+    desc: Start local infrastructure and wait until healthy
+    cmds:
+      - "{{.COMPOSE}} up -d --wait"
+
+  down:
+    desc: Stop local infrastructure (keeps data)
+    cmds:
+      - "{{.COMPOSE}} down"
+
+  reset:
+    desc: Stop local infrastructure and DELETE all data
+    prompt: This deletes all local Postgres and Redpanda data. Continue?
+    cmds:
+      - "{{.COMPOSE}} down -v"
+
+  ps:
+    desc: Show infrastructure status
+    cmds:
+      - "{{.COMPOSE}} ps"
+
+  logs:
+    desc: "Follow logs. Usage: task logs or task logs -- postgres"
+    cmds:
+      - "{{.COMPOSE}} logs -f {{.CLI_ARGS}}"
+
+  psql:
+    desc: Open a psql shell in the local database
+    cmds:
+      - "{{.COMPOSE}} exec postgres psql -U clinic -d clinic"
+    interactive: true
+
+  # ── Backend ─────────────────────────────────────────────────
+  build:
+    desc: Build all backend packages
+    dir: backend
+    cmds:
+      - go build ./...
+
+  test:
+    desc: Run backend tests with the race detector
+    dir: backend
+    cmds:
+      - go test -race -count=1 ./...
+
+  vet:
+    desc: Run go vet
+    dir: backend
+    cmds:
+      - go vet ./...
+
+  # TODO(step-0): lint and fmt tasks (added in 0.6 with golangci-lint)
+
+  gen:
+    desc: Generate code (sqlc, buf)
+    cmds:
+      # TODO(step-2): cd backend && sqlc generate
+      # TODO(step-5): cd proto && buf generate
+      - echo "nothing to generate yet"
+
+  migrate:
+    desc: Apply database migrations
+    dir: backend
+    cmds:
+      # TODO(step-2): go run ./cmd/migrate up
+      - echo "no migrations yet"
+
+  # ── Roadmap ─────────────────────────────────────────────────
+  todo:
+    desc: "List remaining TODOs. Usage: task todo or task todo STEP=2"
+    cmds:
+      - >-
+        grep -rnF
+        --include='*.go' --include='*.ts' --include='*.tsx'
+        --include='*.proto' --include='*.sql' --include='*.yml'
+        --include='*.yaml' --include='*.example' --include='.gitkeep'
+        --exclude-dir=node_modules --exclude-dir=.next --exclude-dir=.git
+        "{{if .STEP}}TODO(step-{{.STEP}}){{else}}TODO(step-{{end}}" .
+        || echo "No TODOs left{{if .STEP}} for step {{.STEP}}{{end}}."
+
+  # ── CI parity ───────────────────────────────────────────────
+  ci:
+    desc: Run what CI runs
+    cmds:
+      - task: vet
+      - task: build
+      - task: test
+      # TODO(step-0): add lint (0.6)
